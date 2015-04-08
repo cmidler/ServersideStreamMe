@@ -1,0 +1,14 @@
+{
+    "applications": {
+        "StreamMe": {
+            "applicationId": "kS3R0NQNdM1tIUJvRJjuIROjKnqWCEHG6qNPo1R7", 
+            "masterKey": "Ml4oUAsz3HhqdjkiJOAovXH3QQbX7JmORhDiclPB"
+        }, 
+        "_default": {
+            "link": "StreamMe"
+        }
+    }, 
+    "global": {
+        "parseVersion": "1.3.0"
+    }
+}
