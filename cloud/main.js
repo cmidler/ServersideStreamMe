@@ -278,7 +278,6 @@ Parse.Cloud.define("countUsersForStreams", function(request,response){
 	var streamPointer = new Parse.Object("Stream");
 	streamPointer.id = request.params.streamId;			
 	query.equalTo("stream",streamPointer);
-	query.equalTo("isValid", true);
 	query.notEqualTo("isIgnored", true);
 	//get the count
 	query.count({
@@ -291,7 +290,6 @@ Parse.Cloud.define("countUsersForStreams", function(request,response){
 	});
 
 });
-
 
 Parse.Cloud.define("consoleLogFunction", function(request,response){
 	var user = request.user;
@@ -558,9 +556,10 @@ Parse.Cloud.define("getNewStreamsFromNearbyUsers", function(request,response){
 							// Build the actual push notification target query
 							var pushQuery = new Parse.Query(Parse.Installation);
 							pushQuery.equalTo('user', user);
-							pushQuery.notEqualTo('badge',0);//don't send a push if they haven't opened the old one
+							pushQuery.equalTo('badge',0);//don't send a push if they haven't opened the old one
 							//Send out push
 							Parse.Push.send({
+								expiration_interval: 1200, //Set 20 minute interval for the user to receive the push
 							    where: pushQuery, // Set our Installation query
 							    data: {
 						    		alert: "New Streams Nearby",
@@ -633,6 +632,8 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 		{
 			
 			var deleteUserStreams = new Array();
+			//get date of 30 minutes ago - 1800000 is 30 minutes ago
+			var thirtyMinutesAgo = new Date((new Date()) - 1800000);
 			for(var i =0; i < userStreams.length; i++)
 			{
 				var streamPointer = userStreams[i].get("stream");
