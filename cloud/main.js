@@ -433,6 +433,208 @@ Parse.Cloud.define("getSharesForStream", function(request, response){
 	});
 });
 
+//helper function to send push when new stream
+Parse.Cloud.define("sendPushForStream", function(request,response){
+
+	//get the requesting user
+	var user = request.user;
+
+	//error checking
+	if(user == null || user.id == null || request.params == null || 
+		request.params.userIds == null || !request.params.userIds.length || 
+		request.params.streamId == null)
+	{
+		response.error("-1");
+		return;
+	}
+
+	Parse.Cloud.useMasterKey();
+
+	//make sure the stream exists first
+	var streamPointer = new Parse.Object("Stream");
+	streamPointer.id = request.params.streamId;
+
+	//stream query
+	var query = new Parse.Query("Stream");
+	query.equalTo("objectId", request.params.streamId);
+	query.find({
+		success:function(streams)
+		{
+			if(!streams || !streams.length)
+			{
+				response.error("No stream by that Id");
+				return;
+			}
+
+			//create user objects for each userid received
+			var userObjects = new Array();
+			for(var i = 0; i < request.params.userIds.length; i++)
+			{
+				//don't let the user's user id be one of them
+				if(user.id == request.params.userIds[i])
+					continue;
+				var userPointer = new Parse.Object("_User");
+				userPointer.id = request.params.userIds[i];
+				userObjects.push(userPointer);
+			}
+
+			//making sure there is a reason to run the query
+			if(!userObjects.length)
+			{
+				response.success("No users");
+				return;
+			}
+
+			//make sure we are also only sending to users who don't have the stream
+			var userStreamsQuery = new Parse.Query("UserStreams");
+			userStreamsQuery.equalTo("stream", streamPointer);
+			userStreamsQuery.containedIn("user", userObjects);
+			userStreamsQuery.include("user");
+			userStreamsQuery.find({
+
+				success: function(userStreams) {
+		      		
+		      		var userList = new Array();
+
+		      		//loop through the users streams to see if the user has a userstream
+		      		for(var j = 0; j < userObjects.length; j++)
+		      		{
+		      			var tmpUser = userObjects[j];
+		      			var i = 0;
+		      			//go through the users that have this user stream
+				    	for(; i < userStreams.length; i++)
+				    	{
+				    		var person = userStreams[i].get("user");
+
+				    		//if the query is the user then we need to add the userstream for the user
+				    		if(tmpUser.id == person.id)
+				    			break;
+				    	}
+
+				    	//found match if we looped all the way through userstreams
+				    	if(i == userStreams.length)
+				    		userList.push(tmpUser);
+			    	}
+
+			    	if(userList.length)
+			    	{
+					  	//Send out push silently to those that have a badge already
+					  	// Build the actual push notification target query
+						var pushSilentQuery = new Parse.Query(Parse.Installation);
+						pushSilentQuery.containedIn("user",userList);
+						//Send out push
+						Parse.Push.send({
+							expiration_interval: 1200, //Set 20 minute interval for the user to receive the push
+						    where: pushSilentQuery, // Set our Installation query
+						    data: {
+					    		data: request.params.streamId,//let the app know there is a new user user stream
+					    		"content-available": 1,
+					  		}
+						}, {
+						    success: function() {
+						    },
+						    error: function() {
+						    }
+					  	});
+					}
+				  	response.success();
+
+			  	},
+			    error: function() {
+			    	response.error("-2");
+			     	return;
+			    }
+
+			});
+
+		},
+		error: function(){
+			response.error("-3");
+			return;
+		}
+	});
+
+	
+
+});
+
+//Create a user stream based on a stream Id
+Parse.Cloud.define("createNewUserStream", function(request,response){
+	
+	//get the requesting user
+	var user = request.user;
+
+	//error checking
+	if(user == null || user.id == null || request.params == null || 
+		request.params.streamId == null)
+	{
+		response.error("-1");
+		return;
+	}
+
+	Parse.Cloud.useMasterKey();
+
+	//make sure the stream exists first
+	var streamPointer = new Parse.Object("Stream");
+	streamPointer.id = request.params.streamId;
+
+
+	//streamshare query
+	var query = new Parse.Query("UserStreams");
+	query.equalTo("stream", streamPointer);
+	query.include("share");
+	query.include("creator");
+	query.inculde("stream_share");
+	query.descending("updatedAt");//get the most recently updated one first
+	query.limit(1);
+	query.find({
+		success:function(userStreams)
+		{
+			if(!userStreams || !userStreams.length)
+			{
+				response.error("No stream by that Id");
+				return;
+			}
+
+			//setup the acl
+			var acl = new Parse.ACL();
+			acl.setPublicReadAccess(false);
+			acl.setPublicWriteAccess(false);
+			acl.setWriteAccess(user.id, true);
+			acl.setReadAccess(user.id,true);
+
+			//create a new userstream and save it
+			var UserStreamsClass = Parse.Object.extend("UserStreams");
+			var userStream = new UserStreamsClass();
+			userStream.set("stream", streamPointer);
+			userStream.set("isIgnored",false);
+			userStream.set("user",user);
+			userStream.set("creator", userStreams[0].get("creator"));
+			userStream.set("share", userStreams[0].get("share"));
+			userStream.set("stream_share", userStreams[0].get("stream_share"));
+			userStream.setACL(acl);
+			userStream.save(null,
+			{
+				success:function(userStreamSave) 
+				{ 
+					response.success();
+					return;
+				},
+				error:function(error)
+				{
+					response.error(error);
+					return;
+				}
+			});
+
+		},
+		error: function()
+		{
+			response.error("-2");
+			return;
+		}
+	});
+});
 
 //helper function to get new streams based on the users around you
 Parse.Cloud.define("getNewStreamsFromNearbyUsers", function(request,response){
