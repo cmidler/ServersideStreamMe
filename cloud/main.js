@@ -14,6 +14,105 @@ Parse.Cloud.afterSave(Parse.User, function(request) {
 });
 
 
+//custom code for sending a push to the users that have content on a stream
+Parse.Cloud.afterSave("StreamShares", function(request){
+	Parse.Cloud.useMasterKey();
+	var user = request.user;
+	//error checking
+	if(user == null || user.id == null)
+	{
+		response.error("-1");
+		return;
+	}
+
+	//get the streamshare
+	var streamShare = request.object;
+	//don't push if the stream share existed already
+	if(streamShare.existed())
+	{
+		console.log("Streamshare already exists so no push");
+		return;
+	}
+
+
+	//get a stream pointer for the stream shares
+	var streamPointer = new Parse.Object("Stream");
+	streamPointer.id = streamShare.get("stream").id;
+
+	//construct a query to find the users to send a push to
+	var query = new Parse.Query("StreamShares");
+	query.notEqualTo("user", user);
+	query.equalTo("stream", streamPointer);
+	query.include("user");
+	query.find({
+		success: function(streamShares) {
+			if(!streamShares || !streamShares.length)
+			{
+				console.log("No other users have a streamshare");
+				return;
+			}
+			
+			//add unique users to array
+			var userArray = new Array();
+			for(var i =0; i < streamShares.length; i++)
+			{
+				var j =0;
+				var streamUser = streamShares[i].get("user");
+				//see if the user is already in the array
+				for(; j < userArray.length; j++)
+				{
+					if(streamUser == userArray[j])
+						break;
+				}
+
+				//if we reached the end of the array, push the user into the userArray
+				if(j == userArray.length)
+					userArray.push(streamUser);
+			}
+
+			//don't send a push if I don't need to
+			if(!userArray.length)
+			{
+				console.log("Didn't add any users");
+				return;
+			}
+
+			// Build the actual push notification target query
+			var pushQuery = new Parse.Query(Parse.Installation);
+			pushQuery.containedIn('user', userArray);
+			pushQuery.notEqualTo('badge',0);//don't send a push if they haven't opened the old one
+			//Send out push
+			Parse.Push.send({
+				expiration_interval: 1200, //Set 20 minute interval for the user to receive the push
+			    where: pushQuery, // Set our Installation query
+			    data: {
+		    		alert: "New Content On A Stream",
+		    		badge: "Increment", //ios only
+		    		sound: "cheering.caf",
+		    		title: "New Content On A Stream" //android only
+		  		}
+			}, {
+			    success: function() {
+			    	console.log("sent push to users on new share");
+		      		return;
+			    },
+			    error: function() {
+			    	console.log("error sending push to users on new share");
+			     	return;
+			    }
+		  	});
+
+
+		},
+		error: function(err)
+		{
+			return;
+		}
+	});
+
+
+});
+
 //for parse installations before saving
 Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
 
