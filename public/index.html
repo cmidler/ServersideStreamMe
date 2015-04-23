@@ -21,6 +21,12 @@
     <link href="css/style.css" rel="stylesheet">
 	<link href="color/default.css" rel="stylesheet">
 
+	<!-- Le HTML5 shim, for IE6-8 support of HTML5 elements -->
+    <!--[if lt IE 9]>
+      <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->    
+    <script src="js/validation.js" type="text/javascript"></script>
+
 </head>
 
 <body id="page-top" data-spy="scroll" data-target=".navbar-custom">
@@ -284,7 +290,7 @@
     <div class="row">
         <div class="col-lg-12">
             <div class="boxed-grey">
-                <form id="contact-form" method="post" action="js/send_form_email.php">
+                <form id="contactform" method="post" action="js/sendemail.php"  onsubmit="return validation();">
                 <div class="row">
                     <div class="col-md-6">
                         <div class="form-group">

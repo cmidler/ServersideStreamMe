@@ -304,7 +304,6 @@ hr {
 .intro {
 	width:100%;
 	position:relative;
-	min-height: 300px;
   min-width: 600px;
 	background: url(../img/Background_StreamMe.png) no-repeat top center;
 
