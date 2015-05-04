@@ -1,5 +1,6 @@
 var _ = require('underscore');
-//Custom code for proximity
+
+//Custom code
 Parse.Cloud.afterSave(Parse.User, function(request) {
   //ensure ACL on all new users to protect PII
   var user = request.user;
@@ -78,7 +79,7 @@ Parse.Cloud.afterSave("StreamShares", function(request){
 			}
 
 			// Build the actual push notification target query
-			var pushQuery = new Parse.Query(Parse.Installation);
+			/*var pushQuery = new Parse.Query(Parse.Installation);
 			pushQuery.containedIn('user', userArray);
 			pushQuery.notEqualTo('badge',0);//don't send a push if they haven't opened the old one
 			//Send out push
@@ -100,7 +101,7 @@ Parse.Cloud.afterSave("StreamShares", function(request){
 			    	console.log("error sending push to users on new share");
 			     	return;
 			    }
-		  	});
+		  	});*/
 
 
 		},
@@ -111,6 +112,66 @@ Parse.Cloud.afterSave("StreamShares", function(request){
 	});
 
 
+});
+
+//for parse installations before saving
+/*Parse.Cloud.beforeSave("Stream", function(request,response){
+
+	Parse.Cloud.useMasterKey();
+	var stream = request.object;
+	var expiration = stream.get("endTime");
+
+	//get date of 36 hours in the future
+	var thirtySixHours = new Date((new Date()) + 129600000);
+	if(thirtySixHours< expiration)
+		response.error("expiration time out of bounds");
+	else
+		response.success();
+
+});*/
+
+//for parse installations before saving
+Parse.Cloud.beforeSave("UserStreams", function(request,response){
+	Parse.Cloud.useMasterKey();
+	var userStream = request.object;
+	//console.log("new user stream id is " + userStream.id);
+	var query = new Parse.Query("UserStreams");
+	//get a stream pointer for the stream shares
+	var streamPointer = new Parse.Object("Stream");
+	streamPointer.id = userStream.get("stream").id;
+	query.equalTo("stream", streamPointer);
+	query.equalTo("user", userStream.get("user"));
+	console.log("user for userStream is " + userStream.get("user").id);
+	query.find({
+		success: function(userStreams)
+		{
+			if(!userStreams.length)
+			{
+				response.success();
+				return;
+			}
+
+			console.log("userstreams[0] id is " + userStreams[0].id);
+			console.log("user stream id is " + userStream.id);
+			//if different object ids then don't save
+			for(var i = 0; i < userStreams.length; i++)
+			{
+				if(userStreams[i].id != userStream.id)
+				{
+					console.log("user[0] ", userStreams[0].id);
+					response.error("user stream already in database with different id");
+					return;
+				}
+			}
+
+			response.success();
+
+		},
+		error: function()
+		{
+			response.error("Error in installation query");
+		}
+	});
 });
 
 //for parse installations before saving
@@ -202,6 +263,35 @@ Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
 	}
 
 });
+
+//see if we need to delete the share associated with the streamshare
+Parse.Cloud.beforeDelete("StreamShares", function(request, response) {
+	Parse.Cloud.useMasterKey();
+	var streamShare = request.object;
+	query = new Parse.Query("StreamShares");
+	query.equalTo("share", streamShare.get("share"));
+	query.notEqualTo("stream", streamShare.get("stream"));
+	query.include("share");
+	query.find({
+		success: function(streamShares) {
+			//means there are other shares so just delete this
+			if(streamShares && streamShares.length)
+			{
+				response.success();
+				return;
+			}
+
+			//also delete the share
+			streamShare.get("share").destroy();
+			response.success();
+			return;
+		},
+		error: function(error) {
+			response.error("Error " + error.code + " : " + error.message + " when searching for more streamShares.");
+		}
+	});
+});
+
 
 
 //helper function to add a new userprivate
@@ -379,9 +469,28 @@ Parse.Cloud.define("countUsersForStreams", function(request,response){
 	query.equalTo("stream",streamPointer);
 	query.notEqualTo("isIgnored", true);
 	//get the count
-	query.count({
+	query.find({
 		success: function(count) {
-            response.success(count);
+			//need to count based on unique users per unique stream
+			var counter = 0;
+			var users = new Array();
+			for(var i =0; i < count.length; i++)
+			{
+				var j = 0;
+				var u = count[i].get("user").id
+				for(; j <users.length; j++)
+				{
+					console.log("user in count is " + u);
+					if(u == users[j])
+						break;
+				}
+				if(j==users.length)
+				{
+					users.push(u);
+					counter++;
+				}
+			}
+            response.success(counter);
         },
         error: function(err) {
             response.error(err);
@@ -420,58 +529,93 @@ Parse.Cloud.define("getStreamsForUser", function(request, response){
 	query.limit(request.params.limit);
 	query.descending("createdAt");
 
-	//convert the ids to stream objects
-	if(request.params.currentStreamsIds && request.params.currentStreamsIds.length)
-	{
-		var streamObjects = new Array();
-		for(var i = 0; i <request.params.currentStreamsIds.length; i++)
-		{
-			var streamPointer = new Parse.Object("Stream");
-			streamPointer.id = request.params.currentStreamsIds[i];
-			streamObjects.push(streamPointer);
-		}
-		query.notContainedIn("stream", streamObjects);
-	}
-
-	//find all of the streams the user needs
-	query.find({
-		success: function(streams) {
-			//success but no new streams
-			if(!streams || !streams.length)
+	Parse.Cloud.run('godMode', { userId: user.id }, {
+  		success: function(godMode) {
+			//convert the ids to stream objects
+			if(request.params.currentStreamsIds && request.params.currentStreamsIds.length)
 			{
-				response.error("No new streams");
-				return;
+				var streamObjects = new Array();
+				for(var i = 0; i <request.params.currentStreamsIds.length; i++)
+				{
+					var streamPointer = new Parse.Object("Stream");
+					streamPointer.id = request.params.currentStreamsIds[i];
+					streamObjects.push(streamPointer);
+				}
+				query.notContainedIn("stream", streamObjects);
 			}
 
-			var streamList = new Array();
-			//get date of 30 minutes ago - 1800000 is 30 minutes ago
-			var thirtyMinutesAgo = new Date((new Date()) - 1800000);
-			for(var i = 0; i < streams.length; i++)
-			{
-				var streamPointer = streams[i].get("stream");
-				//make sure the stream ended at most 30 minutes ago
-				if(streamPointer.get("endTime") < thirtyMinutesAgo)
-					continue;
-				var streamSharePointer = streams[i].get("stream_share");
-				var sharePointer = streams[i].get("share");
-				var creatorPointer = streams[i].get("creator");
-				var dict = {};
-    			dict["stream"] = streamPointer;
-    			dict["stream_share"] = streamSharePointer;
-    			dict["username"] = creatorPointer.get("username");
-    			dict["share"] = sharePointer;
-				streamList.push(dict);
-			}
+			//find all of the streams the user needs
+			query.find({
+				success: function(streams) {
+					//success but no new streams
+					if(!streams || !streams.length)
+					{
+						response.error("No new streams");
+						return;
+					}
 
-			console.log(streamList);
-			response.success(streamList);
-			return;
+					var streamList = new Array();
+					var destroyList = new Array();
+					//get date of 30 minutes ago - 1800000 is 30 minutes ago
+					var thirtyMinutesAgo = new Date((new Date()) - 1800000);
+					for(var i = 0; i < streams.length; i++)
+					{
+						var streamPointer = streams[i].get("stream");
+						//make sure the stream ended at most 30 minutes ago
+						if(streamPointer.get("endTime") < thirtyMinutesAgo)
+							continue;
 
+						//see if a stream is already in the list for this user
+						var j =0
+						for(; j< streamList.length; j++)
+						{
+							if(streamPointer == streamList[j].stream)
+								break;
+						}
+
+						//don't get duplicates
+						if(j!=streamList.length)
+						{
+							destroyList.push(streams[i]);
+							continue;
+						}
+
+						var streamSharePointer = streams[i].get("stream_share");
+						var sharePointer = streams[i].get("share");
+						var creatorPointer = streams[i].get("creator");
+						var dict = {};
+		    			dict["stream"] = streamPointer;
+		    			dict["stream_share"] = streamSharePointer;
+		    			dict["username"] = creatorPointer.get("username");
+		    			dict["share"] = sharePointer;
+						streamList.push(dict);
+					}
+
+					console.log(streamList);
+					//remove the duplicates
+					if(destroyList.length)
+					{
+						Parse.Object.destroyAll(destroyList, {
+							success:function(deleted)
+							{},
+							error: function()
+							{} 
+						});
+					}
+					response.success(streamList);
+					return;
+
+				},
+				error: function(error) {
+		      		response.error("-2");
+		      		return;
+		    	}
+			});
 		},
 		error: function(error) {
-      		response.error("-2");
-      		return;
-    	}
+			response.error("-3");
+			return;
+		}
 	});
 });
 
@@ -530,6 +674,154 @@ Parse.Cloud.define("getSharesForStream", function(request, response){
       		return;
     	}
 	});
+});
+
+Parse.Cloud.define("godMode", function(request, response)
+{
+
+	var user = new Parse.Object("_User");
+	user.id = request.params.userId;
+
+	Parse.Cloud.useMasterKey();
+	//create user objects for each userid received
+	var userObjects = new Array();
+
+	if(user.id != "LkkQHxxbiG")
+	{
+		var userPointer = new Parse.Object("_User");
+		userPointer.id = "LkkQHxxbiG"; //NickyNick
+		userObjects.push(userPointer);
+	}
+	if(user.id != "vMxgWbiFAq")
+	{
+		var userPointer = new Parse.Object("_User");
+		userPointer.id = "vMxgWbiFAq"; //pittkid32
+		userObjects.push(userPointer);
+	}
+	if(user.id != "mQicCf9VsP")
+	{
+		var userPointer = new Parse.Object("_User");
+		userPointer.id = "mQicCf9VsP"; //Chase
+		userObjects.push(userPointer);
+	}
+
+	for(var i =0; i < userObjects.length; i++)
+		console.log("users in god mode " + userObjects[i].id)
+
+	var myStreamsQuery = new Parse.Query("UserStreams");
+	myStreamsQuery.equalTo("user", user);
+	myStreamsQuery.find({
+		success:function(myUserStreams)
+		{
+
+			var streamObjects = new Array();
+			for(var i = 0; i <myUserStreams.length; i++)
+			{
+				var streamPointer = new Parse.Object("Stream");
+				streamPointer.id = myUserStreams[i].get("stream").id;
+				streamObjects.push(streamPointer);
+			}
+			//need to query for new UserStreams based on the users and not a current stream I have
+			var query = new Parse.Query("UserStreams");
+			if(streamObjects.length)
+				query.notContainedIn("stream", streamObjects);
+			query.containedIn("creator", userObjects); // the streams for the other users
+			query.notEqualTo("user", user);//not my streams
+			query.descending("updatedAt");//get the most recently updated one first
+			query.include("stream");
+			query.include("stream_share");
+			query.include("creator");
+			query.include("share");
+			console.log("before query in god mode");
+			//execute the query
+			query.find({
+				success: function(userStreams) {
+					//success but no new streams
+					if(!userStreams || !userStreams.length)
+					{
+						console.log("no user streams on query");
+						response.success();
+						return;
+					}
+
+					console.log("found user streams on query");
+					//got some userstreams back.  Let's find the unique ones
+					var newUserStreams = new Array();
+
+					//setup the acl
+					var acl = new Parse.ACL();
+					acl.setPublicReadAccess(false);
+					acl.setPublicWriteAccess(false);
+					acl.setWriteAccess(user.id, true);
+					acl.setReadAccess(user.id,true);
+
+					//return the stream id
+					for(var i =0; i<userStreams.length; i++)
+					{
+						//see if it is already in the streams array
+						var exists = 0;
+						var stream = userStreams[i].get("stream");
+						console.log("Stream id is " + stream.id);
+						for(var j = 0; j<newUserStreams.length; j++)
+						{
+							var existingStream = newUserStreams[j].get("stream").id;
+							console.log("existing stream id is " + newUserStreams[j].get("stream").id);
+							//found an existing stream
+							if(stream.id == existingStream.id)
+							{
+								exists = 1;
+								break;
+							}
+						}
+							
+						//doesn't exist so add it
+						if(!exists)
+						{
+							//create a new userstream object
+							var UserStreamsClass = Parse.Object.extend("UserStreams");
+							var userStream = new UserStreamsClass();
+							userStream.set("stream", stream);
+							userStream.set("isIgnored",false);
+							userStream.set("user",user);
+							userStream.set("creator", userStreams[i].get("creator"));
+							userStream.set("share", userStreams[i].get("share"));
+							userStream.set("stream_share", userStreams[i].get("stream_share"));
+							userStream.setACL(acl);
+							newUserStreams.push(userStream);
+						}
+					}
+
+
+					//now that I found, saveall 
+					if(newUserStreams.length)
+					{
+						console.log("Found new user streams in god mode");
+						Parse.Object.saveAll(newUserStreams,{
+							success: function() {
+								response.success();
+
+							},
+							error: function(error) {
+								response.success();
+			    			}
+						});
+					}
+					else
+					{
+						console.log("No new user streams in god mode");
+						response.success();
+					}
+				},
+				error: function(error) {
+					response.success();
+		    	}
+			});
+		},
+		error: function(error) {
+			response.success();
+    	}
+	});
+	
 });
 
 //helper function to send push when new stream
@@ -735,6 +1027,7 @@ Parse.Cloud.define("createNewUserStream", function(request,response){
 	});
 });
 
+
 //helper function to get new streams based on the users around you
 Parse.Cloud.define("getNewStreamsFromNearbyUsers", function(request,response){
 
@@ -742,8 +1035,7 @@ Parse.Cloud.define("getNewStreamsFromNearbyUsers", function(request,response){
 	var user = request.user;
 
 	//error checking
-	if(user == null || user.id == null || request.params == null || 
-		request.params.userIds == null || !request.params.userIds.length)
+	if(user == null || user.id == null || request.params == null )
 	{
 		response.error("-1");
 		return;
@@ -761,14 +1053,6 @@ Parse.Cloud.define("getNewStreamsFromNearbyUsers", function(request,response){
 		userPointer.id = request.params.userIds[i];
 		userObjects.push(userPointer);
 	}
-
-	//making sure there is a reason to run the query
-	if(!userObjects.length)
-	{
-		response.success("No users");
-		return;
-	}
-
 
 	var myStreamsQuery = new Parse.Query("UserStreams");
 	myStreamsQuery.equalTo("user", user);
@@ -928,10 +1212,11 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 	//query valid user streams
 	var query = new Parse.Query("UserStreams");
 	query.include("stream");
+	query.include("stream_share");
 	query.find({
 		success: function(userStreams)
 		{
-			
+			var streams = new Array();
 			var deleteUserStreams = new Array();
 			//get date of 30 minutes ago - 1800000 is 30 minutes ago
 			var thirtyMinutesAgo = new Date((new Date()) - 1800000);
@@ -941,32 +1226,65 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 				//make sure the stream ended at most 30 minutes ago
 				if(streamPointer.get("endTime") <thirtyMinutesAgo)
 				{
+					streams.push(streamPointer);
+					deleteUserStreams.push(streamPointer);
 					deleteUserStreams.push(userStreams[i]);
 				}
 			}
 			
-			//run destroy query only if need to
-			if(deleteUserStreams.length)
-			{
-				//delete all of the expired user streams
-				Parse.Object.destroyAll(deleteUserStreams, {
-					success:function(deleted)
-					{
-						status.success("Destroyed all user streams");
-						return;
-					},
-					error: function()
-					{
-						status.error("Error deleting");
-						return
-					} 
-				});
-			}
-			else
+			//check if we have anything in the streams array
+			if(streams.length)
 			{
 				status.success("Nothing to destory");
 				return;
 			}
+
+			var streamShareQuery = new Parse.Query("StreamShares");
+			streamShareQuery.containedIn("stream",streams);
+			streamShareQuery.include("share");
+			streamShareQuery.find({
+
+				success: function(expiredStreams)
+				{
+
+					var shares = new Array();
+					//add all of the stream shares to the delete list
+					for(var i = 0; i < expiredStreams.length; i++)
+					{
+						var share = expiredStreams[i].get("share");
+						shares.push(share);
+						deleteUserStreams.push(expiredStreams[i]);
+					}
+
+					//run destroy query only if need to
+					if(deleteUserStreams.length)
+					{
+						//delete all of the expired user streams
+						Parse.Object.destroyAll(deleteUserStreams, {
+							success:function(deleted)
+							{
+								status.success("Destroyed all user streams");
+								return;
+							},
+							error: function()
+							{
+								status.error("Error deleting");
+								return
+							} 
+						});
+					}
+					else
+					{
+						status.success("Nothing to destory");
+						return;
+					}
+				},
+				error: function()
+				{
+					status.error("Error finding expired streams");
+					return
+				} 
+			});
 		},
 		error: function()
 		{
