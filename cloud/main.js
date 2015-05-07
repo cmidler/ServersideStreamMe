@@ -115,20 +115,23 @@ Parse.Cloud.afterSave("StreamShares", function(request){
 });
 
 //for parse installations before saving
-/*Parse.Cloud.beforeSave("Stream", function(request,response){
+Parse.Cloud.beforeSave("Stream", function(request,response){
 
 	Parse.Cloud.useMasterKey();
 	var stream = request.object;
 	var expiration = stream.get("endTime");
 
 	//get date of 36 hours in the future
-	var thirtySixHours = new Date((new Date()) + 129600000);
+	var thirtySixHours = new Date(new Date().getTime() + 129600000);
 	if(thirtySixHours< expiration)
+	{
+		console.log("expiration is " + expiration + " and thirtySix is " + thirtySixHours);
 		response.error("expiration time out of bounds");
+	}
 	else
 		response.success();
 
-});*/
+});
 
 //for parse installations before saving
 Parse.Cloud.beforeSave("UserStreams", function(request,response){
@@ -557,7 +560,7 @@ Parse.Cloud.define("getStreamsForUser", function(request, response){
 					var streamList = new Array();
 					var destroyList = new Array();
 					//get date of 30 minutes ago - 1800000 is 30 minutes ago
-					var thirtyMinutesAgo = new Date((new Date()) - 1800000);
+					var thirtyMinutesAgo = new Date((new Date().getTime()) - 1800000);
 					for(var i = 0; i < streams.length; i++)
 					{
 						var streamPointer = streams[i].get("stream");
@@ -704,6 +707,13 @@ Parse.Cloud.define("godMode", function(request, response)
 		userPointer.id = "mQicCf9VsP"; //Chase
 		userObjects.push(userPointer);
 	}
+	if(user.id != "t6O9gulbTV")
+	{
+		var userPointer = new Parse.Object("_User");
+		userPointer.id = "t6O9gulbTV"; //StreamMe Admin
+		userObjects.push(userPointer);
+	}
+
 
 	for(var i =0; i < userObjects.length; i++)
 		console.log("users in god mode " + userObjects[i].id)
@@ -1219,7 +1229,7 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 			var streams = new Array();
 			var deleteUserStreams = new Array();
 			//get date of 30 minutes ago - 1800000 is 30 minutes ago
-			var thirtyMinutesAgo = new Date((new Date()) - 1800000);
+			var thirtyMinutesAgo = new Date((new Date().getTime()) - 1800000);
 			for(var i =0; i < userStreams.length; i++)
 			{
 				var streamPointer = userStreams[i].get("stream");
@@ -1233,7 +1243,7 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 			}
 			
 			//check if we have anything in the streams array
-			if(streams.length)
+			if(!streams.length)
 			{
 				status.success("Nothing to destory");
 				return;
