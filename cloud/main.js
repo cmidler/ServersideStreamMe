@@ -483,7 +483,6 @@ Parse.Cloud.define("countUsersForStreams", function(request,response){
 				var u = count[i].get("user").id
 				for(; j <users.length; j++)
 				{
-					console.log("user in count is " + u);
 					if(u == users[j])
 						break;
 				}
@@ -572,8 +571,12 @@ Parse.Cloud.define("getStreamsForUser", function(request, response){
 						var j =0
 						for(; j< streamList.length; j++)
 						{
-							if(streamPointer == streamList[j].stream)
+							if(streamPointer.id == streamList[j].stream.id)
 								break;
+							else
+							{
+								console.log("streamPointer id is " + streamPointer.id + "and streamlist is " + streamList[j].stream.id);
+							}
 						}
 
 						//don't get duplicates
