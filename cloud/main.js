@@ -563,6 +563,9 @@ Parse.Cloud.define("getStreamsForUser", function(request, response){
 					for(var i = 0; i < streams.length; i++)
 					{
 						var streamPointer = streams[i].get("stream");
+						if(!streamPointer)
+							continue;
+						console.log("streamPointer is " + streamPointer);
 						//make sure the stream ended at most 30 minutes ago
 						if(streamPointer.get("endTime") < thirtyMinutesAgo)
 							continue;
