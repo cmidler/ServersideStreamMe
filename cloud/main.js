@@ -1119,7 +1119,9 @@ Parse.Cloud.define("getNewStreamsFromNearbyUsers", function(request,response){
 						//see if it is already in the streams array
 						var exists = 0;
 						var stream = userStreams[i].get("stream");
-						console.log("Stream id is " + stream.id);
+						if(!stream)
+							continue;
+						//console.log("Stream id is " + stream.id);
 						for(var j = 0; j<newUserStreams.length; j++)
 						{
 							var existingStream = newUserStreams[j].get("stream").id;
