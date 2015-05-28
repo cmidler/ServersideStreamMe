@@ -652,6 +652,7 @@ Parse.Cloud.define("findStreamsByGPS", function(request, response){
 			if(streamList.length)
 				streamQuery.notContainedIn("objectId", streamList);
 			streamQuery.near("location", loc);
+			streamQuery.withinMiles("location", loc, 3958.8)
 			streamQuery.notEqualTo("isValid", false);
 			streamQuery.limit(1000);
 			streamQuery.include("creator");
@@ -787,13 +788,16 @@ Parse.Cloud.define("getStreamsForUser", function(request, response){
 	}
 
 	var loc = request.params.currentLocation;
-
 	//ok need to query for the streams the user is a part of that are not part of the current streams
 	var query = new Parse.Query("UserStreams");
 	query.equalTo("user", user);
 	query.notEqualTo("isValid", false);
+	
 	if(loc)
+	{
 		query.near("location",loc);
+		query.withinMiles("location", loc, 20000)
+	}
 	query.include("stream");
 	query.include("creator");
 	query.include("stream_share");
@@ -1212,29 +1216,19 @@ Parse.Cloud.define("sendPushForStream", function(request,response){
 				    		userList.push(tmpUser);
 			    	}
 
+			    	//for each user add a new userstream
 			    	if(userList.length)
 			    	{
-					  	//Send out push silently to those that have a badge already
-					  	// Build the actual push notification target query
-						var pushSilentQuery = new Parse.Query(Parse.Installation);
-						pushSilentQuery.containedIn("user",userList);
-						//Send out push
-						Parse.Push.send({
-							expiration_interval: 1200, //Set 20 minute interval for the user to receive the push
-						    where: pushSilentQuery, // Set our Installation query
-						    data: {
-						    	badge: 1,
-					    		data: request.params.streamId,//let the app know there is a new user user stream
-					    		"content-available": 1,
-					  		}
-						}, {
-						    success: function() {
-						    	response.success("Sent push");
-						    },
-						    error: function() {
-						    	response.error("Couldn't send push");
-						    }
-					  	});
+			    		for(var i = 0; i<userList.length; i++)
+			    		{
+			    			var newUserId = userList[i].id;
+				    		Parse.Cloud.run('createNewUserStream', { newUserId: newUserId, streamId:request.params.streamId  }, {
+	  							success: function(createNewUserStream) {},
+						  		error: function() {
+							    }
+				    		});
+			    		}
+			    		response.success("Added new user streams for bluetooth");
 					}
 					else
 				  		response.success("No users to send push to");
@@ -1263,6 +1257,12 @@ Parse.Cloud.define("createNewUserStream", function(request,response){
 	
 	//get the requesting user
 	var user = request.user;
+
+	if(!user)
+	{
+		user = new Parse.Object("_User");
+		user.id = request.params.newUserId;
+	} 
 
 	//error checking
 	if(user == null || user.id == null || request.params == null || 
@@ -1306,21 +1306,46 @@ Parse.Cloud.define("createNewUserStream", function(request,response){
 			//create a new userstream and save it
 			var UserStreamsClass = Parse.Object.extend("UserStreams");
 			var userStream = new UserStreamsClass();
-			userStream.set("stream", streamPointer);
+			userStream.set("stream", userStreams[0].get("stream"));
 			userStream.set("isIgnored",false);
 			userStream.set("user",user);
 			userStream.set("creator", userStreams[0].get("creator"));
 			userStream.set("share", userStreams[0].get("share"));
-			userStream.set("location", stream.get("location"));
+			userStream.set("location", userStreams[0].get("location"));
 			userStream.set("stream_share", userStreams[0].get("stream_share"));
 			userStream.set("gotByBluetooth", true);
+			userStream.set("isValid", true);
 			userStream.setACL(acl);
 			userStream.save(null,
 			{
 				success:function(userStreamSave) 
 				{ 
-					response.success();
-					return;
+					//send a push if we saved a new userstream
+					// Build the actual push notification target query
+					var pushQuery = new Parse.Query(Parse.Installation);
+					pushQuery.equalTo('user', user);
+					pushQuery.equalTo('badge',0);//don't send a push if they haven't opened the old one
+					//Send out push
+					Parse.Push.send({
+						expiration_interval: 1200, //Set 20 minute interval for the user to receive the push
+					    where: pushQuery, // Set our Installation query
+					    data: {
+				    		alert: "New Streams Nearby",
+				    		badge: Increment, //ios only
+				    		sound: "cheering.caf",
+				    		title: "New Streams Nearby" //android only
+				  		}
+					}, {
+					    success: function() {
+				      		// Push was successful
+				      		response.success("Sent push");
+				      		return;
+					    },
+					    error: function() {
+					    	response.error("-2");
+					     	return;
+					    }
+				  	});
 				},
 				error:function(error)
 				{
