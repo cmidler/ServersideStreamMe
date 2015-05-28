@@ -121,6 +121,14 @@ Parse.Cloud.beforeSave("Stream", function(request,response){
 	var stream = request.object;
 	var expiration = stream.get("endTime");
 
+	var loc = stream.get("location");
+	if(!loc)
+	{
+		//default location
+		var point = new Parse.GeoPoint(0, 0);
+		stream.set("location",point);
+	}
+
 	//get date of 36 hours in the future
 	var thirtySixHours = new Date(new Date().getTime() + 129600000);
 	if(dates.compare(thirtySixHours, expiration)<1)
@@ -143,6 +151,14 @@ Parse.Cloud.beforeSave("UserStreams", function(request,response){
 	{
 		response.success();
 		return;
+	}
+
+	var loc = userStream.get("location");
+	if(!loc)
+	{
+		//default location
+		var point = new Parse.GeoPoint(0, 0);
+		userStream.set("location",point);
 	}
 
 	//console.log("new user stream id is " + userStream.id);
@@ -186,7 +202,7 @@ Parse.Cloud.beforeSave("UserStreams", function(request,response){
 });
 
 //for parse installations before saving
-Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
+/*Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
 
 	//get the submitted user
 	var installation = request.object;
@@ -274,7 +290,7 @@ Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
 	}
 
 });
-
+*/
 //see if we need to delete the share associated with the streamshare
 Parse.Cloud.beforeDelete("StreamShares", function(request, response) {
 	Parse.Cloud.useMasterKey();
@@ -703,6 +719,8 @@ Parse.Cloud.define("findStreamsByGPS", function(request, response){
 										userStream.set("share", share);
 										userStream.set("location", stream.get("location"));
 										userStream.set("stream_share", streamShares[j]);
+										userStream.set("gotByBluetooth", false);
+										userStream.set("isValid", true);
 										userStream.setACL(acl);
 										newUserStreams.push(userStream);
 										break;
@@ -1211,12 +1229,15 @@ Parse.Cloud.define("sendPushForStream", function(request,response){
 					  		}
 						}, {
 						    success: function() {
+						    	response.success("Sent push");
 						    },
 						    error: function() {
+						    	response.error("Couldn't send push");
 						    }
 					  	});
 					}
-				  	response.success();
+					else
+				  		response.success("No users to send push to");
 
 			  	},
 			    error: function() {
@@ -1622,7 +1643,7 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 			var streams = new Array();
 			var deleteUserStreams = new Array();
 			var streamList = new Array();
-			var point = new Parse.GeoPoint(40.46180284585846, -79.92356878712766);
+			var point = new Parse.GeoPoint(0, 0);
 			//get date of 30 minutes ago - 1800000 is 30 minutes ago
 			var thirtyMinutesAgo = new Date((new Date().getTime()) - 1800000);
 			for(var i =0; i < userStreams.length; i++)
