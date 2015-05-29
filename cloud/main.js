@@ -115,6 +115,20 @@ Parse.Cloud.afterSave("StreamShares", function(request){
 });
 
 //for parse installations before saving
+Parse.Cloud.beforeSave("Share", function(request,response){
+	Parse.Cloud.useMasterKey();
+	var share = request.object;
+	var loc = share.get("location");
+	if(!loc)
+	{
+		//default location
+		var point = new Parse.GeoPoint(0, 0);
+		share.set("location",point);
+	}
+	response.success();
+});
+
+//for parse installations before saving
 Parse.Cloud.beforeSave("Stream", function(request,response){
 
 	Parse.Cloud.useMasterKey();
@@ -202,7 +216,7 @@ Parse.Cloud.beforeSave("UserStreams", function(request,response){
 });
 
 //for parse installations before saving
-/*Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
+Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
 
 	//get the submitted user
 	var installation = request.object;
@@ -290,7 +304,7 @@ Parse.Cloud.beforeSave("UserStreams", function(request,response){
 	}
 
 });
-*/
+
 //see if we need to delete the share associated with the streamshare
 Parse.Cloud.beforeDelete("StreamShares", function(request, response) {
 	Parse.Cloud.useMasterKey();
@@ -1228,7 +1242,26 @@ Parse.Cloud.define("sendPushForStream", function(request,response){
 							    }
 				    		});
 			    		}
-			    		response.success("Added new user streams for bluetooth");
+			    		//Send out push silently to those that have a badge already
+					  	// Build the actual push notification target query
+						var pushSilentQuery = new Parse.Query(Parse.Installation);
+						pushSilentQuery.containedIn("user",userList);
+						//Send out push
+						Parse.Push.send({
+							expiration_interval: 1200, //Set 20 minute interval for the user to receive the push
+						    where: pushSilentQuery, // Set our Installation query
+						    data: {
+					    		data: request.params.streamId,//let the app know there is a new user user stream
+					    		"content-available": 1,
+					  		}
+						}, {
+						    success: function() {
+						    	response.success("Sent push");
+						    },
+						    error: function() {
+						    	response.error("Couldn't send push");
+						    }
+					  	});
 					}
 					else
 				  		response.success("No users to send push to");
@@ -1274,14 +1307,14 @@ Parse.Cloud.define("createNewUserStream", function(request,response){
 
 	Parse.Cloud.useMasterKey();
 
-	//make sure the stream exists first
+	//make sure the stream exists
 	var streamPointer = new Parse.Object("Stream");
 	streamPointer.id = request.params.streamId;
-
 
 	//streamshare query
 	var query = new Parse.Query("UserStreams");
 	query.equalTo("stream", streamPointer);
+	query.notEqualTo("isValid", false);
 	query.include("share");
 	query.include("creator");
 	query.include("stream_share");
