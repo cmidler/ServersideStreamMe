@@ -215,8 +215,86 @@ Parse.Cloud.beforeSave("UserStreams", function(request,response){
 	});
 });
 
+
+//get an installation
+Parse.Cloud.define("getInstallationForIOS", function(request, response){
+	Parse.Cloud.useMasterKey();
+
+	var deviceToken = request.params.deviceToken;
+	var pushQuery = new Parse.Query(Parse.Installation);
+	pushQuery.equalTo("deviceToken", deviceToken);
+	pushQuery.include("user");
+	pushQuery.find({
+		success: function(installationResults)
+		{
+			//no object to update, return an error, but first create a new installation to save
+			if(!installationResults || !installationResults.length)
+			{
+				response.success();
+				return;
+			}
+
+			//return the first object found
+			response.success(installationResults[0]);
+
+		},
+		error: function(error)
+		{
+			response.error("Error in installation query");
+			return;
+		}
+
+	});
+
+});
+
+//reset the password for a user
+Parse.Cloud.define("resetPassword", function(request, response){
+	Parse.Cloud.useMasterKey();
+
+	var userId = request.params.userId;
+	var query = new Parse.Query("_User");
+	query.equalTo("objectId", userId);
+	query.find({
+		success: function(users)
+		{
+			//no object to update, return an error, but first create a new installation to save
+			if(!users || !users.length)
+			{
+				response.success("Register");
+				return;
+			}
+
+			//reset the user passwords
+			for(var i =0; i< users.length; i++)
+			{
+				users[i].set("password","");
+			}
+
+			Parse.Object.saveAll(users,{
+				success: function() {
+					response.success("Success");
+					return;
+				},
+				error: function(error) {
+					response.error("error saving user");
+					return;
+    			}
+			});
+
+		},
+		error: function(error)
+		{
+			response.error("Error in user query");
+			return;
+		}
+
+	});
+
+});
+
 //for parse installations before saving
-Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
+/*Parse.Cloud.beforeSave(Parse.Installation, function(request,response){
 
 	//get the submitted user
 	var installation = request.object;
@@ -331,7 +409,7 @@ Parse.Cloud.beforeDelete("StreamShares", function(request, response) {
 			response.error("Error " + error.code + " : " + error.message + " when searching for more streamShares.");
 		}
 	});
-});
+});*/
 
 
 
@@ -353,7 +431,7 @@ Parse.Cloud.useMasterKey();
 		success: function(userPrivate) {
 			if(userPrivate && userPrivate.length)
 			{
-				response.err("Already exists");
+				response.success("Already exists");
 				return;
 			}
 			var acl = new Parse.ACL();
@@ -921,6 +999,56 @@ Parse.Cloud.define("getStreamsForUser", function(request, response){
 
 
 //help to get shares for a stream
+Parse.Cloud.define("getNewestSharesForStream", function(request, response){
+
+	Parse.Cloud.useMasterKey();
+	var user = request.user;
+
+	//basic error checking
+	if(user == null || user.id == null || request == null || request.params == null 
+		|| request.params.streamId == null || request.params.maxShares == null )
+	{
+		response.error("-1");
+		return;
+	}
+
+	//get helper vars
+	var maxShares = request.params.maxShares;
+	var lastShareTime = request.params.lastShareTime;
+	var direction = request.params.direction;
+	var streamShareIds = request.params.streamShareIds;
+	//create the query
+	var query = new Parse.Query("StreamShares");
+	var streamPointer = new Parse.Object("Stream");
+	streamPointer.id = request.params.streamId;
+	query.equalTo("stream", streamPointer);
+	query.include("share");
+
+	//get the stream shares not to download
+	if(streamShareIds)
+		query.notContainedIn("objectId",streamShareIds);
+
+	query.limit(request.params.maxShares);
+	query.ascending("createdAt");
+
+	//find all of the streams the user needs
+	query.find({
+		success: function(streamShares) {
+			//success 
+			response.success(streamShares);
+			return;
+
+		},
+		error: function(error) {
+      		response.error("-2");
+      		return;
+    	}
+	});
+});
+
+
+
+//help to get shares for a stream
 Parse.Cloud.define("getSharesForStream", function(request, response){
 
 	Parse.Cloud.useMasterKey();
@@ -1426,7 +1554,7 @@ Parse.Cloud.define("getNewStreamsFromNearbyUsers", function(request,response){
 
 	if(userObjects.length)
 	{
-		response.error("bad user objects");
+		response.error("no user objects");
 		return;
 	}
 
@@ -1693,13 +1821,14 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 	var query = new Parse.Query("UserStreams");
 	query.include("stream");
 	query.include("user");
+	query.notEqualTo("isValid", false);
 	query.limit(1000);
 	//query.include("stream_share");
 	query.find({
 		success: function(userStreams)
 		{
 			var streams = new Array();
-			var deleteUserStreams = new Array();
+			//var deleteUserStreams = new Array();
 			var streamList = new Array();
 			var point = new Parse.GeoPoint(0, 0);
 			//get date of 30 minutes ago - 1800000 is 30 minutes ago
@@ -1713,7 +1842,7 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 				var streamPointer = userStreams[i].get("stream");
 				if(!streamPointer)
 				{
-					deleteUserStreams.push(userStreams[i]);
+					//deleteUserStreams.push(userStreams[i]);
 					continue;
 				}
 
@@ -1746,16 +1875,15 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 					var streamsId = streams[j].get("stream");
 					//console.log("destroy vars users: " + userStreamUser.id + " " + streamsUser.id + " streams: " + streamPointer.id + " " + streamsId.id);
 
+					if(!streamPointer || !streamsId || !userStreamUser || !streamUser)
+						continue;
+
 					if(streamPointer.id == streamsId.id && userStreamUser.id == streamsUser.id)
 						break;
 				}
 
 				//don't get duplicates
-				if(j!=streams.length)
-				{
-					deleteUserStreams.push(userStreams[i]);
-				}
-				else
+				if(j==streams.length)
 					streams.push(userStreams[i]);
 			}
 
@@ -1779,7 +1907,7 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 			}
 
 			//run destroy query only if need to
-			if(deleteUserStreams.length)
+			/*if(deleteUserStreams.length)
 			{
 				//delete all of the expired user streams
 				Parse.Object.destroyAll(deleteUserStreams, {
@@ -1794,7 +1922,7 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 						return
 					} 
 				});
-			}
+			}*/
 			
 			//check if we have anything in the streams array
 			if(!streams.length)
@@ -1877,5 +2005,6 @@ var dates = {
         );
     }
 }
+
 
 
