@@ -744,7 +744,7 @@ Parse.Cloud.define("findStreamsByGPS", function(request, response){
 			if(streamList.length)
 				streamQuery.notContainedIn("objectId", streamList);
 			streamQuery.near("location", loc);
-			streamQuery.withinMiles("location", loc, 3958.8)
+			streamQuery.withinMiles("location", loc, 20000)
 			streamQuery.notEqualTo("isValid", false);
 			streamQuery.limit(1000);
 			streamQuery.include("creator");
@@ -1828,7 +1828,7 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 		success: function(userStreams)
 		{
 			var streams = new Array();
-			//var deleteUserStreams = new Array();
+			var deleteUserStreams = new Array();
 			var streamList = new Array();
 			var point = new Parse.GeoPoint(0, 0);
 			//get date of 30 minutes ago - 1800000 is 30 minutes ago
@@ -1840,9 +1840,10 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 					userStreams[i].set("location", point);
 
 				var streamPointer = userStreams[i].get("stream");
-				if(!streamPointer)
+				var userStreamUser = userStreams[i].get("user");
+				if(!streamPointer || !userStreamUser)
 				{
-					//deleteUserStreams.push(userStreams[i]);
+					deleteUserStreams.push(userStreams[i]);
 					continue;
 				}
 
@@ -1870,13 +1871,21 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 				var j =0
 				for(; j< streams.length; j++)
 				{
-					var userStreamUser = userStreams[i].get("user");
 					var streamsUser = streams[j].get("user");
 					var streamsId = streams[j].get("stream");
-					//console.log("destroy vars users: " + userStreamUser.id + " " + streamsUser.id + " streams: " + streamPointer.id + " " + streamsId.id);
+					
+					/*if(userStreamUser)
+						console.log(streamPointer.id);
+					else
+						console.log(streamPointer.id + "  " + i);*/
 
-					if(!streamPointer || !streamsId || !userStreamUser || !streamUser)
-						continue;
+					//if(!userStreamUser.id)
+					//	console.log("11112");
+					/*if(!streamsId.id)
+						console.log("11113");
+					if(!streamsUser.id)
+						console.log("11114");*/
+					//console.log("destroy vars users: " + userStreamUser.id + " " + streamsUser.id + " streams: " + streamPointer.id+ " " + streamsId.id);
 
 					if(streamPointer.id == streamsId.id && userStreamUser.id == streamsUser.id)
 						break;
@@ -1885,11 +1894,13 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 				//don't get duplicates
 				if(j==streams.length)
 					streams.push(userStreams[i]);
+				else
+					deleteUserStreams.push(userStreams[i]);
 			}
 
 			//console.log("streams length is " + streams.length);
 			//console.log("delete length is " + deleteUserStreams.length);
-			console.log("stream length is " + streamList.length);
+			//console.log("stream length is " + streamList.length);
 			if(streamList.length)
 			{
 				Parse.Object.saveAll(streamList, {
@@ -1907,22 +1918,23 @@ Parse.Cloud.job("upkeepUserStreams", function(request, status) {
 			}
 
 			//run destroy query only if need to
-			/*if(deleteUserStreams.length)
+			if(deleteUserStreams.length)
 			{
+				console.log("we have users to delete!");
 				//delete all of the expired user streams
 				Parse.Object.destroyAll(deleteUserStreams, {
 					success:function(deleted)
 					{
 						//status.success("Destroyed all user streams");
-						return;
+						//return;
 					},
 					error: function()
 					{
 						//status.error("Error deleting");
-						return
+						//return
 					} 
 				});
-			}*/
+			}
 			
 			//check if we have anything in the streams array
 			if(!streams.length)
