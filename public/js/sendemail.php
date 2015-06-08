@@ -1,5 +1,5 @@
 <?php
- if(isset($_POST['submit']))
+ if($_POST['submit'])
  {
  	if(!isset($_POST['name']) ||
 
@@ -37,7 +37,7 @@
 	if(mail($to,$subject,$message,$headers))
 		header("Location:../contact.php?msg=Successful Submission! Thankyou for contacting us.");
 	else
-		header("Location:../contact.php?msg=Error To send Email! Please email Nick@StreamMe.co");
+		header("Location:../contact.php?msg=Error To send Email! Please email help@StreamMe.co");
 		//contact:-your-email@your-domain.com
  }
 ?>
