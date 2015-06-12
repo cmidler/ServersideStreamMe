@@ -215,6 +215,15 @@ Parse.Cloud.beforeSave("UserStreams", function(request,response){
 	});
 });
 
+Parse.Cloud.afterSave("Comment", function(request) {
+	Parse.Cloud.useMasterKey();
+	var comment = request.object;
+
+	var streamSharePointer = comment.get("stream_share");
+	streamSharePointer.increment("commentTotal");
+	streamSharePointer.save();
+});
+
 
 //get an installation
 Parse.Cloud.define("getInstallationForIOS", function(request, response){
@@ -570,6 +579,36 @@ Parse.Cloud.define("countSharesForStreams", function(request,response){
         		}
 			});
             
+        },
+        error: function(err) {
+            response.error(err);
+        }
+	});
+
+});
+
+//helper function to count the amount of comments for a given streamshare
+Parse.Cloud.define("countCommentsForStreamShare", function(request,response){
+
+	//quick error checking
+	Parse.Cloud.useMasterKey();
+
+	if(request == null || request.params == null || 
+		request.params.streamShareId == null)
+	{
+		response.error("-1");
+		return;
+	}
+
+	//create the query
+	var query = new Parse.Query("Comment");
+	var streamSharePointer = new Parse.Object("StreamShares");
+	streamSharePointer.id = request.params.streamShareId;			
+	query.equalTo("stream_share",streamSharePointer);
+	//get the count
+	query.count({
+		success: function(count) {
+			response.success(count);
         },
         error: function(err) {
             response.error(err);
@@ -1094,6 +1133,7 @@ Parse.Cloud.define("getStreamsForUserWithLocation", function(request, response){
 								commentDict["createdAt"] = comments[i].createdAt;
 								commentDict["text"] = comments[i].get("text");
 								commentDict["username"] = comments[i].get("username");
+								commentDict["commentId"] = comments[i].id;
 								commentArray.push(commentDict);
 							}
 							dict["comments"] = commentArray;
@@ -1187,6 +1227,7 @@ Parse.Cloud.define("getNewestCommentsForStreamShare", function(request, response
 				commentDict["createdAt"] = comments[i].createdAt;
 				commentDict["text"] = comments[i].get("text");
 				commentDict["username"] = comments[i].get("username");
+				commentDict["commentId"] = comments[i].id;
 				commentArray.push(commentDict);
 			}
 			response.success(commentArray);
@@ -1266,6 +1307,7 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 								commentDict["createdAt"] = comments[i].createdAt;
 								commentDict["text"] = comments[i].get("text");
 								commentDict["username"] = comments[i].get("username");
+								commentDict["commentId"] = comments[i].id;
 								commentArray.push(commentDict);
 							}
 							dict["comments"] = commentArray;
