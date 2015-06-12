@@ -235,7 +235,17 @@ Parse.Cloud.define("getInstallationForIOS", function(request, response){
 			}
 
 			//return the first object found
-			response.success(installationResults[0]);
+			for(var i = 0; i < installationResults.length; i++)
+			{
+				if(installationResults[i] && installationResults[i].get("user"))
+				{
+					response.success(installationResults[i]);
+					return;
+				}
+			}
+
+			response.success();
+			return;
 
 		},
 		error: function(error)
@@ -866,8 +876,119 @@ Parse.Cloud.define("findStreamsByGPS", function(request, response){
 });
 
 
+
+
+
+
+
+
 //Helper function to get the streams for a user
 Parse.Cloud.define("getStreamsForUser", function(request, response){
+	//quick error checking
+	Parse.Cloud.useMasterKey();
+	var user = request.user;
+
+	if(user == null || user.id == null || request == null || request.params == null || 
+		request.params.limit == null)
+	{
+		response.error("-1");
+		return;
+	}
+
+	//ok need to query for the streams the user is a part of that are not part of the current streams
+	var query = new Parse.Query("UserStreams");
+	query.equalTo("user", user);
+	query.notEqualTo("isValid", false);
+	query.include("stream");
+	query.include("creator");
+	query.include("stream_share");
+	query.include("share");
+	query.limit(request.params.limit);
+	query.descending("gotByBluetooth");
+
+	//find all of the streams the user needs
+	query.find({
+		success: function(streams) {
+			//success but no new streams
+			if(!streams || !streams.length)
+			{
+				response.error("No new streams");
+				return;
+			}
+
+			var streamList = new Array();
+			var destroyList = new Array();
+			//get date of 30 minutes ago - 1800000 is 30 minutes ago
+			var thirtyMinutesAgo = new Date((new Date().getTime()) - 1800000);
+			for(var i = 0; i < streams.length; i++)
+			{
+				var streamPointer = streams[i].get("stream");
+				if(!streamPointer)
+					continue;
+				//console.log("streamPointer is " + streamPointer);
+				//make sure the stream ended at most 30 minutes ago
+				if(dates.compare(streamPointer.get("endTime"), thirtyMinutesAgo)<1)
+				{
+
+					console.log("Stream is expired: " +streamPointer.id);
+					continue;
+				}
+
+				console.log("Valid stream is " + streamPointer.id);
+
+				//see if a stream is already in the list for this user
+				var j =0
+				for(; j< streamList.length; j++)
+				{
+					if(streamPointer.id == streamList[j].stream.id)
+						break;
+				}
+
+				//don't get duplicates
+				if(j!=streamList.length)
+				{
+					destroyList.push(streams[i]);
+					continue;
+				}
+
+				var streamSharePointer = streams[i].get("stream_share");
+				var sharePointer = streams[i].get("share");
+				var creatorPointer = streams[i].get("creator");
+				var dict = {};
+    			dict["stream"] = streamPointer;
+    			dict["stream_share"] = streamSharePointer;
+    			dict["username"] = creatorPointer.get("username");
+    			dict["share"] = sharePointer;
+    			dict["gotByBluetooth"] = streams[i].get("gotByBluetooth");
+				streamList.push(dict);
+			}
+
+			console.log(streamList);
+			//remove the duplicates
+			if(destroyList.length)
+			{
+				Parse.Object.destroyAll(destroyList, {
+					success:function(deleted)
+					{},
+					error: function()
+					{} 
+				});
+			}
+			response.success(streamList);
+			return;
+
+		},
+		error: function(error) {
+      		response.error("-2");
+      		return;
+    	}
+	});
+});
+
+
+
+//Helper function to get the streams for a user
+Parse.Cloud.define("getStreamsForUserWithLocation", function(request, response){
 	//quick error checking
 	Parse.Cloud.useMasterKey();
 	var user = request.user;
@@ -897,106 +1018,188 @@ Parse.Cloud.define("getStreamsForUser", function(request, response){
 	query.limit(request.params.limit);
 	query.descending("gotByBluetooth");
 
-	Parse.Cloud.run('godMode', { userId: user.id }, {
-  		success: function(godMode) {
-			//convert the ids to stream objects
-			if(request.params.currentStreamsIds && request.params.currentStreamsIds.length)
+	//find all of the streams the user needs
+	query.find({
+		success: function(streams) {
+			//success but no new streams
+			if(!streams || !streams.length)
 			{
-				var streamObjects = new Array();
-				for(var i = 0; i <request.params.currentStreamsIds.length; i++)
-				{
-					var streamPointer = new Parse.Object("Stream");
-					streamPointer.id = request.params.currentStreamsIds[i];
-					streamObjects.push(streamPointer);
-				}
-				query.notContainedIn("stream", streamObjects);
+				response.error("No new streams");
+				return;
 			}
 
-			//find all of the streams the user needs
-			query.find({
-				success: function(streams) {
-					//success but no new streams
-					if(!streams || !streams.length)
+			var streamList = new Array();
+			var destroyList = new Array();
+			//get date of 30 minutes ago - 1800000 is 30 minutes ago
+			var thirtyMinutesAgo = new Date((new Date().getTime()) - 1800000);
+
+			return Parse.Promise.as().then(function() { // this just gets the ball rolling
+				var promise = Parse.Promise.as()
+
+				_.each(streams, function(userStreamObj) { // use underscore, its better :)
+	      			
+      				var streamPointer = userStreamObj.get("stream");
+					if(!streamPointer)
+						return;
+					//console.log("streamPointer is " + streamPointer);
+					//make sure the stream ended at most 30 minutes ago
+					if(dates.compare(streamPointer.get("endTime"), thirtyMinutesAgo)<1)
 					{
-						response.error("No new streams");
+
+						console.log("Stream is expired: " +streamPointer.id);
 						return;
 					}
 
-					var streamList = new Array();
-					var destroyList = new Array();
-					//get date of 30 minutes ago - 1800000 is 30 minutes ago
-					var thirtyMinutesAgo = new Date((new Date().getTime()) - 1800000);
-					for(var i = 0; i < streams.length; i++)
+					console.log("Valid stream is " + streamPointer.id);
+
+					//see if a stream is already in the list for this user
+					var j =0
+					for(; j< streamList.length; j++)
 					{
-						var streamPointer = streams[i].get("stream");
-						if(!streamPointer)
-							continue;
-						//console.log("streamPointer is " + streamPointer);
-						//make sure the stream ended at most 30 minutes ago
-						if(dates.compare(streamPointer.get("endTime"), thirtyMinutesAgo)<1)
-						{
-
-							console.log("Stream is expired: " +streamPointer.id);
-							continue;
-						}
-
-						console.log("Valid stream is " + streamPointer.id);
-
-						//see if a stream is already in the list for this user
-						var j =0
-						for(; j< streamList.length; j++)
-						{
-							if(streamPointer.id == streamList[j].stream.id)
-								break;
-						}
-
-						//don't get duplicates
-						if(j!=streamList.length)
-						{
-							destroyList.push(streams[i]);
-							continue;
-						}
-
-						var streamSharePointer = streams[i].get("stream_share");
-						var sharePointer = streams[i].get("share");
-						var creatorPointer = streams[i].get("creator");
-						var dict = {};
-		    			dict["stream"] = streamPointer;
-		    			dict["stream_share"] = streamSharePointer;
-		    			dict["username"] = creatorPointer.get("username");
-		    			dict["share"] = sharePointer;
-		    			dict["gotByBluetooth"] = streams[i].get("gotByBluetooth");
-						streamList.push(dict);
+						if(streamPointer.id == streamList[j].stream.id)
+							break;
 					}
 
-					console.log(streamList);
-					//remove the duplicates
-					if(destroyList.length)
+					//don't get duplicates
+					if(j!=streamList.length)
 					{
-						Parse.Object.destroyAll(destroyList, {
-							success:function(deleted)
-							{},
-							error: function()
-							{} 
-						});
+						destroyList.push(userStreamObj);
+						return;
 					}
-					response.success(streamList);
-					return;
 
-				},
-				error: function(error) {
-		      		response.error("-2");
-		      		return;
-		    	}
+					promise = promise.then(function() { // each time this loops the promise gets reassigned to the function below
+
+						var streamSharePointer = userStreamObj.get("stream_share");
+						var commentQuery = new Parse.Query("Comment");
+						commentQuery.equalTo("stream_share", streamSharePointer);
+						commentQuery.limit(10);
+						commentQuery.ascending("createdAt");
+						return commentQuery.find().then(function(comments) {
+							
+							var sharePointer = userStreamObj.get("share");
+							var creatorPointer = userStreamObj.get("creator");
+							var streamSharePointer = userStreamObj.get("stream_share");
+							var dict = {};
+			    			dict["stream"] = streamPointer;
+			    			dict["stream_share"] = streamSharePointer;
+			    			dict["username"] = creatorPointer.get("username");
+			    			dict["share"] = sharePointer;
+			    			dict["gotByBluetooth"] = userStreamObj.get("gotByBluetooth");
+							
+
+							var commentArray = new Array();
+							for(var i = 0; i< comments.length; i++)
+							{
+								var commentDict = {};
+								commentDict["createdAt"] = comments[i].createdAt;
+								commentDict["text"] = comments[i].get("text");
+								commentDict["username"] = comments[i].get("username");
+								commentArray.push(commentDict);
+							}
+							dict["comments"] = commentArray;
+							streamList.push(dict);
+							return Parse.Promise.as(); // the code will wait again for the above to complete because there is another promise returning here (this is just a default promise, but you could also run something like return object.save() which would also return a promise)
+
+							},function (error) {
+								//gotError = j+1;
+								response.error("Error looking up comments");
+							});
+					})
+				});
+				return promise; // this will not be triggered until the whole loop above runs and all promises above are resolved
+
+			}).then(function() {
+				//remove the duplicates
+				if(destroyList.length)
+				{
+					Parse.Object.destroyAll(destroyList, {
+						success:function(deleted)
+						{},
+						error: function()
+						{} 
+					});
+				}
+				response.success(streamList); 
+			}, function (error) {
+				//remove the duplicates
+				if(destroyList.length)
+				{
+					Parse.Object.destroyAll(destroyList, {
+						success:function(deleted)
+						{},
+						error: function()
+						{} 
+					});
+				}
+				response.error("script failed with error.code: " + error.code + " error.message: " + error.message);
 			});
+
+			//console.log(streamList);
+			
+
 		},
 		error: function(error) {
-			response.error("-3");
-			return;
-		}
+      		response.error("-2");
+      		return;
+    	}
 	});
 });
 
+
+//help to get more comments for a stream share
+Parse.Cloud.define("getNewestCommentsForStreamShare", function(request, response){
+
+	Parse.Cloud.useMasterKey();
+	var user = request.user;
+
+	//basic error checking
+	if(user == null || user.id == null || request == null || request.params == null 
+		|| request.params.streamShareId == null)
+	{
+		response.error("-1");
+		return;
+	}
+
+	var streamSharePointer = new Parse.Object("StreamShares");
+	streamSharePointer.id = request.params.streamShareId;
+
+
+	//build query
+	var commentQuery = new Parse.Query("Comment");
+	commentQuery.equalTo("stream_share", streamSharePointer);
+	commentQuery.limit(10);
+	commentQuery.ascending("createdAt");
+	if(request.params.commentIds && request.params.commentIds.length)
+		commentQuery.notContainedIn("objectId", request.params.commentIds);
+	commentQuery.find({
+		success: function(comments) {
+			if(!comments || ! comments.length)
+			{
+				response.error("No comments");
+				return;
+			}
+
+			var commentArray = new Array();
+
+			for(var i = 0; i < comments.length; i++)
+			{
+				var commentDict = {};
+				commentDict["createdAt"] = comments[i].createdAt;
+				commentDict["text"] = comments[i].get("text");
+				commentDict["username"] = comments[i].get("username");
+				commentArray.push(commentDict);
+			}
+			response.success(commentArray);
+			return;
+		},
+		error:function(error){
+			response.error("Error finding comments");
+			return;
+		}
+	});
+
+
+});
 
 //help to get shares for a stream
 Parse.Cloud.define("getNewestSharesForStream", function(request, response){
@@ -1034,9 +1237,56 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 	//find all of the streams the user needs
 	query.find({
 		success: function(streamShares) {
-			//success 
-			response.success(streamShares);
-			return;
+
+			//ok we got new stream shares, now get the comments for the stream shares
+			//var gotError = 0;
+			var streamSharesAndComments = new Array(); 
+			return Parse.Promise.as().then(function() { // this just gets the ball rolling
+				var promise = Parse.Promise.as()
+
+				_.each(streamShares, function(streamShareObj) { // use underscore, its better :)
+	      			promise = promise.then(function() { // each time this loops the promise gets reassigned to the function below
+
+						var commentQuery = new Parse.Query("Comment");
+						commentQuery.equalTo("stream_share", streamShareObj);
+						commentQuery.limit(10);
+						commentQuery.ascending("createdAt");
+						return commentQuery.find().then(function(comments) {
+						//commentQuery.find({
+							//success: function(comments) {
+								//find the streamshare and add the comments
+
+							console.log("comments length is " + comments.length);
+							var dict = {};
+							dict["stream_share"] = streamShareObj;
+							var commentArray = new Array();
+							for(var i = 0; i< comments.length; i++)
+							{
+								var commentDict = {};
+								commentDict["createdAt"] = comments[i].createdAt;
+								commentDict["text"] = comments[i].get("text");
+								commentDict["username"] = comments[i].get("username");
+								commentArray.push(commentDict);
+							}
+							dict["comments"] = commentArray;
+							streamSharesAndComments.push(dict);
+							console.log("stream shares and comments length is " + streamSharesAndComments.length);
+
+							return Parse.Promise.as(); // the code will wait again for the above to complete because there is another promise returning here (this is just a default promise, but you could also run something like return object.save() which would also return a promise)
+
+							},function (error) {
+								//gotError = j+1;
+								response.error("Error looking up comments");
+							});
+					})
+				});
+				return promise; // this will not be triggered until the whole loop above runs and all promises above are resolved
+
+			}).then(function() {
+				response.success(streamSharesAndComments); 
+			}, function (error) {
+				response.error("script failed with error.code: " + error.code + " error.message: " + error.message);
+			});
 
 		},
 		error: function(error) {
@@ -1552,7 +1802,7 @@ Parse.Cloud.define("getNewStreamsFromNearbyUsers", function(request,response){
 			userObjects.push(userPointer);
 	}
 
-	if(userObjects.length)
+	if(!userObjects.length)
 	{
 		response.error("no user objects");
 		return;
