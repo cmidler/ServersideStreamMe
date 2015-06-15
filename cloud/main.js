@@ -16,18 +16,24 @@ Parse.Cloud.afterSave(Parse.User, function(request) {
 
 
 //custom code for sending a push to the users that have content on a stream
-Parse.Cloud.afterSave("StreamShares", function(request){
+/*Parse.Cloud.afterSave("StreamShares", function(request){
 	Parse.Cloud.useMasterKey();
 	var user = request.user;
-	//error checking
-	if(user == null || user.id == null)
-	{
-		response.error("-1");
-		return;
-	}
 
 	//get the streamshare
 	var streamShare = request.object;
+	if(streamShare.existed())
+	{
+		//error checking
+		if(user == null || user.id == null)
+		{
+			console.log("error saving streamshare");
+			//response.error("-1");
+			return;
+		}
+	}
+
+	
 	//don't push if the stream share existed already
 	if(streamShare.existed())
 	{
@@ -101,7 +107,7 @@ Parse.Cloud.afterSave("StreamShares", function(request){
 			    	console.log("error sending push to users on new share");
 			     	return;
 			    }
-		  	});*/
+		  	});
 
 
 		},
@@ -112,7 +118,7 @@ Parse.Cloud.afterSave("StreamShares", function(request){
 	});
 
 
-});
+});*/
 
 //for parse installations before saving
 Parse.Cloud.beforeSave("Share", function(request,response){
@@ -125,6 +131,21 @@ Parse.Cloud.beforeSave("Share", function(request,response){
 		var point = new Parse.GeoPoint(0, 0);
 		share.set("location",point);
 	}
+	response.success();
+});
+
+//for parse installations before saving
+Parse.Cloud.beforeSave("StreamShares", function(request,response){
+	Parse.Cloud.useMasterKey();
+	var streamShare = request.object;
+	if(streamShare.existed())
+	{
+		response.success();
+		return;
+	}
+
+	streamShare.set("commentTotal", 0);
+	streamShare.set("likeTotal", 0);
 	response.success();
 });
 
@@ -214,6 +235,45 @@ Parse.Cloud.beforeSave("UserStreams", function(request,response){
 		}
 	});
 });
+
+/*Parse.Cloud.beforeSave("StreamSharesLike", function(request, response){
+	Parse.Cloud.useMasterKey();
+	var streamShareLike = request.object;
+	var streamSharePointer = streamShareLike.get("stream_share");
+	//if it doesn't exist then it will be a change of 1
+	if(!streamShareLike.existed())
+	{
+		streamSharePointer.increment("likeTotal");
+		console.log("incrementing by 1");
+	}
+	//if it does exist then we  are making a change of 2
+	else
+	{
+		if(streamShareLike.get("likeValue") > 0)
+		{
+			streamSharePointer.increment("likeTotal",2);
+			console.log("incrementing by 2 for likevalue " + streamShareLike.get("likeValue"));
+		}
+		else
+		{
+			streamSharePointer.increment("likeTotal",-2);
+			console.log("decrementing by 2 for like value " + streamShareLike.get("likeValue"));
+		}
+	}
+
+	streamSharePointer.save(null,
+					{
+						success:function(streamShareSave) 
+						{ 
+							response.success();
+						},
+						error:function(error)
+						{
+							response.error("Problems incrementing");
+						}
+					});
+	
+});*/
 
 Parse.Cloud.afterSave("Comment", function(request) {
 	Parse.Cloud.useMasterKey();
@@ -587,6 +647,39 @@ Parse.Cloud.define("countSharesForStreams", function(request,response){
 
 });
 
+
+//helper function to count the amount of comments for a given streamshare
+Parse.Cloud.define("incrementStreamLikeTotal", function(request,response){
+
+	//quick error checking
+	Parse.Cloud.useMasterKey();
+
+	if(request == null || request.params == null || 
+		request.params.streamShareId == null || request.params.incValue == null)
+	{
+		response.error("-1");
+		return;
+	}
+
+	var incValue = request.params.incValue;
+	var streamSharePointer = new Parse.Object("StreamShares");
+	streamSharePointer.id = request.params.streamShareId;
+	streamSharePointer.increment("likeTotal", incValue);
+	streamSharePointer.save(null,
+					{
+						success:function(streamShareSave) 
+						{ 
+							response.success();
+						},
+						error:function(error)
+						{
+							response.error("Problems incrementing");
+						}
+					});
+
+
+});
+
 //helper function to count the amount of comments for a given streamshare
 Parse.Cloud.define("countCommentsForStreamShare", function(request,response){
 
@@ -609,6 +702,43 @@ Parse.Cloud.define("countCommentsForStreamShare", function(request,response){
 	query.count({
 		success: function(count) {
 			response.success(count);
+        },
+        error: function(err) {
+            response.error(err);
+        }
+	});
+
+});
+
+//helper function to count the amount of comments for a given streamshare
+Parse.Cloud.define("getCommentAndLikeTotal", function(request,response){
+
+	//quick error checking
+	Parse.Cloud.useMasterKey();
+
+	if(request == null || request.params == null || 
+		request.params.streamShareId == null)
+	{
+		response.error("-1");
+		return;
+	}
+
+	//create the query
+	var query = new Parse.Query("StreamShares");		
+	query.equalTo("objectId",request.params.streamShareId);
+	//get the count
+	query.find({
+		success: function(streamShare) {
+			if(!streamShare || !streamShare.length)
+			{
+				response.error("no stream share");
+				return;
+			}
+
+			var counts = new Array();
+			counts.push(streamShare[0].get("commentTotal"));
+			counts.push(streamShare[0].get("likeTotal"));
+			response.success(counts);
         },
         error: function(err) {
             response.error(err);
@@ -1074,22 +1204,26 @@ Parse.Cloud.define("getStreamsForUserWithLocation", function(request, response){
 
 			return Parse.Promise.as().then(function() { // this just gets the ball rolling
 				var promise = Parse.Promise.as()
-
+				//var likePromise = Parse.Promise.as();
+				var promises = [];
 				_.each(streams, function(userStreamObj) { // use underscore, its better :)
 	      			
       				var streamPointer = userStreamObj.get("stream");
 					if(!streamPointer)
-						return;
+					{
+						console.log("Not a stream pointer");
+						return true;
+					}
 					//console.log("streamPointer is " + streamPointer);
 					//make sure the stream ended at most 30 minutes ago
 					if(dates.compare(streamPointer.get("endTime"), thirtyMinutesAgo)<1)
 					{
 
 						console.log("Stream is expired: " +streamPointer.id);
-						return;
+						return true;
 					}
 
-					console.log("Valid stream is " + streamPointer.id);
+					
 
 					//see if a stream is already in the list for this user
 					var j =0
@@ -1103,30 +1237,26 @@ Parse.Cloud.define("getStreamsForUserWithLocation", function(request, response){
 					if(j!=streamList.length)
 					{
 						destroyList.push(userStreamObj);
-						return;
+						console.log("added to destroy list");
+						return true;
 					}
 
-					promise = promise.then(function() { // each time this loops the promise gets reassigned to the function below
+					console.log("Valid stream is " + streamPointer.id);
+					
 
-						var streamSharePointer = userStreamObj.get("stream_share");
-						var commentQuery = new Parse.Query("Comment");
-						commentQuery.equalTo("stream_share", streamSharePointer);
-						commentQuery.limit(10);
-						commentQuery.ascending("createdAt");
-						return commentQuery.find().then(function(comments) {
-							
-							var sharePointer = userStreamObj.get("share");
-							var creatorPointer = userStreamObj.get("creator");
-							var streamSharePointer = userStreamObj.get("stream_share");
-							var dict = {};
-			    			dict["stream"] = streamPointer;
-			    			dict["stream_share"] = streamSharePointer;
-			    			dict["username"] = creatorPointer.get("username");
-			    			dict["share"] = sharePointer;
-			    			dict["gotByBluetooth"] = userStreamObj.get("gotByBluetooth");
-							
+					// promise.then(function() { // each time this loops the promise gets reassigned to the function below
 
-							var commentArray = new Array();
+					var streamSharePointer = userStreamObj.get("stream_share");
+					var commentQuery = new Parse.Query("Comment");
+					commentQuery.equalTo("stream_share", streamSharePointer);
+					commentQuery.limit(10);
+					commentQuery.ascending("createdAt");
+					var commentArray = new Array();
+					promise = promise.then(function() {
+						console.log("running promise");
+						return commentQuery.find().then(function(comments) {					
+							console.log("comment query");
+							
 							for(var i = 0; i< comments.length; i++)
 							{
 								var commentDict = {};
@@ -1135,18 +1265,49 @@ Parse.Cloud.define("getStreamsForUserWithLocation", function(request, response){
 								commentDict["username"] = comments[i].get("username");
 								commentDict["commentId"] = comments[i].id;
 								commentArray.push(commentDict);
-							}
-							dict["comments"] = commentArray;
-							streamList.push(dict);
-							return Parse.Promise.as(); // the code will wait again for the above to complete because there is another promise returning here (this is just a default promise, but you could also run something like return object.save() which would also return a promise)
+							}	
+					
+						},function (error) {
+							//gotError = j+1;
+							response.error("Error looking up comments");
+							return;
+						}).then(function(){
+							console.log("promise then function called on " + streamSharePointer.id);
+							var likeQuery = new Parse.Query("StreamSharesLike");
+							likeQuery.equalTo("stream_share", streamSharePointer);
+							likeQuery.equalTo("user", user);
+							return likeQuery.find().then(function(likes){
+								console.log("in like query");
+								var likeValue = 0;
+								if(likes && likes.length)
+									likeValue = likes[0].get("likeValue");
+								console.log("like value is " + likeValue);
+								var sharePointer = userStreamObj.get("share");
+								var creatorPointer = userStreamObj.get("creator");
+								var streamSharePointer = userStreamObj.get("stream_share");
+								var dict = {};
+				    			dict["stream"] = streamPointer;
+				    			dict["stream_share"] = streamSharePointer;
+				    			dict["username"] = creatorPointer.get("username");
+				    			dict["share"] = sharePointer;
+				    			dict["gotByBluetooth"] = userStreamObj.get("gotByBluetooth");
+				    			dict["comments"] = commentArray;
+								dict["likeValue"] = likeValue;
+								streamList.push(dict);
+								console.log("got to right before parse.promise.as");
+								return Parse.Promise.as(); 
 
 							},function (error) {
 								//gotError = j+1;
-								response.error("Error looking up comments");
+								response.error("Error looking up likes");
+								return;
 							});
-					})
+						});
+					});
+					console.log("pushing promise");
+					promises.push(promise);
 				});
-				return promise; // this will not be triggered until the whole loop above runs and all promises above are resolved
+				return Parse.Promise.when(promises); // this will not be triggered until the whole loop above runs and all promises above are resolved
 
 			}).then(function() {
 				//remove the duplicates
@@ -1159,6 +1320,7 @@ Parse.Cloud.define("getStreamsForUserWithLocation", function(request, response){
 						{} 
 					});
 				}
+				console.log("about to respond with streamlist");
 				response.success(streamList); 
 			}, function (error) {
 				//remove the duplicates
@@ -1250,7 +1412,8 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 
 	//basic error checking
 	if(user == null || user.id == null || request == null || request.params == null 
-		|| request.params.streamId == null || request.params.maxShares == null )
+		|| request.params.streamId == null || request.params.maxShares == null 
+		|| request.params.orderBy == null)
 	{
 		response.error("-1");
 		return;
@@ -1261,6 +1424,7 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 	var lastShareTime = request.params.lastShareTime;
 	var direction = request.params.direction;
 	var streamShareIds = request.params.streamShareIds;
+	var orderBy = request.params.orderBy;
 	//create the query
 	var query = new Parse.Query("StreamShares");
 	var streamPointer = new Parse.Object("Stream");
@@ -1272,8 +1436,13 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 	if(streamShareIds)
 		query.notContainedIn("objectId",streamShareIds);
 
+	
 	query.limit(request.params.maxShares);
-	query.ascending("createdAt");
+	
+	if(orderBy == "new")	
+		query.ascending("createdAt");
+	else (orderBy == "old")
+		query.descending("createdAt");
 
 	//find all of the streams the user needs
 	query.find({
@@ -1284,7 +1453,7 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 			var streamSharesAndComments = new Array(); 
 			return Parse.Promise.as().then(function() { // this just gets the ball rolling
 				var promise = Parse.Promise.as()
-
+				var promises = [];
 				_.each(streamShares, function(streamShareObj) { // use underscore, its better :)
 	      			promise = promise.then(function() { // each time this loops the promise gets reassigned to the function below
 
@@ -1292,15 +1461,14 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 						commentQuery.equalTo("stream_share", streamShareObj);
 						commentQuery.limit(10);
 						commentQuery.ascending("createdAt");
+						var commentArray = new Array();
 						return commentQuery.find().then(function(comments) {
 						//commentQuery.find({
 							//success: function(comments) {
 								//find the streamshare and add the comments
 
 							console.log("comments length is " + comments.length);
-							var dict = {};
-							dict["stream_share"] = streamShareObj;
-							var commentArray = new Array();
+							
 							for(var i = 0; i< comments.length; i++)
 							{
 								var commentDict = {};
@@ -1310,19 +1478,44 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 								commentDict["commentId"] = comments[i].id;
 								commentArray.push(commentDict);
 							}
-							dict["comments"] = commentArray;
-							streamSharesAndComments.push(dict);
-							console.log("stream shares and comments length is " + streamSharesAndComments.length);
+							//dict["comments"] = commentArray;
+							
+							//console.log("stream shares and comments length is " + streamSharesAndComments.length);
 
-							return Parse.Promise.as(); // the code will wait again for the above to complete because there is another promise returning here (this is just a default promise, but you could also run something like return object.save() which would also return a promise)
+							//return Parse.Promise.as(); // the code will wait again for the above to complete because there is another promise returning here (this is just a default promise, but you could also run something like return object.save() which would also return a promise)
 
 							},function (error) {
 								//gotError = j+1;
 								response.error("Error looking up comments");
+							}).then(function(){
+								var likeQuery = new Parse.Query("StreamSharesLike");
+								likeQuery.equalTo("stream_share", streamShareObj);
+								likeQuery.equalTo("user", user);
+								return likeQuery.find().then(function(likes){
+									console.log("in like query");
+									var likeValue = 0;
+									if(likes && likes.length)
+										likeValue = likes[0].get("likeValue");
+									console.log("like value is " + likeValue);
+									var dict = {};
+									dict["stream_share"] = streamShareObj;
+					    			dict["comments"] = commentArray;
+									dict["likeValue"] = likeValue;
+									streamSharesAndComments.push(dict);
+									console.log("got to right before parse.promise.as");
+									return Parse.Promise.as(); 
+
+								},function (error) {
+									//gotError = j+1;
+									response.error("Error looking up likes");
+									return;
+								});
 							});
-					})
+						
+					});
+				promises.push(promise);
 				});
-				return promise; // this will not be triggered until the whole loop above runs and all promises above are resolved
+				return Parse.Promise.when(promises); // this will not be triggered until the whole loop above runs and all promises above are resolved
 
 			}).then(function() {
 				response.success(streamSharesAndComments); 
