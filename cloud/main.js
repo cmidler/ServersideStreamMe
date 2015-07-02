@@ -1446,7 +1446,16 @@ Parse.Cloud.define("getNewestSharesForStream", function(request, response){
 
 	//find all of the streams the user needs
 	query.find({
-		success: function(streamShares) {
+		success: function(streamSharesArray) {
+
+			var streamShares = new Array();
+			for(var i =0; i<streamSharesArray.length; i++)
+			{
+				if(streamSharesArray[i].get("share").get("type") != "img")
+					continue;
+
+				streamShares.push(streamSharesArray[i]);
+			}
 
 			//ok we got new stream shares, now get the comments for the stream shares
 			//var gotError = 0;
@@ -1578,8 +1587,17 @@ Parse.Cloud.define("getSharesForStream", function(request, response){
 	//find all of the streams the user needs
 	query.find({
 		success: function(streamShares) {
+
+			var streamSharesArray = new Array();
+			for(var i =0; i<streamShares.length; i++)
+			{
+				if(streamShares[i].get("share").get("type") != "img")
+					continue;
+
+				streamSharesArray.push(streamShares[i]);
+			}
 			//success 
-			response.success(streamShares);
+			response.success(streamSharesArray);
 			return;
 
 		},
